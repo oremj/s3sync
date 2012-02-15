@@ -1,5 +1,7 @@
-from os.path import join
+import json
+from os.path import expanduser, join
 
+from .backends import get_backend
 from .log_settings import log
 from .proxies import PROXY_MAP
 
@@ -8,22 +10,32 @@ class Sync(object):
     """
         Example: 
                  excludes = [re.compile("^temp/.*")]
-                 conn = S3Connection('pub', 'priv')
-                 bucket = conn.get_bucket('my_bucket')
-                 s = Sync(LocalBackend("/tmp/foo"), S3Backend("files/", bucket=bucket), excludes=excludes)
+                 s = Sync("local:///tmp/foo", "s3://bucket/files/", excludes=excludes)
                  s.print_status()
                  s.sync()
 
     """
-    def __init__(self, src, dest, check_md5=False, excludes=None):
+    def __init__(self, src_uri, dest_uri, config=expanduser(join('~', '.s3sync')),
+                    dry_run=False, check_md5=False, excludes=None):
         self.check_md5 = check_md5
         self.excludes = excludes
-        self.src = src
-        self.dest = dest
+        self.dry_run = dry_run
+        self.config = self._parse_config(config)
+        self.src = get_backend(src_uri, self.config)
+        self.dest = get_backend(dest_uri, self.config)
         self.proxy = PROXY_MAP[(self.src.__class__, self.dest.__class__)](self)
         self.adds = self._additions()
         self.removals = self._removals()
         self.modifications = self._modifications()
+
+    def _parse_config(self, f):
+        try:
+            return json.load(open(f))
+        except IOError:
+            log.critical("Config file %s does not exist" % f)
+        except ValueError, e:
+            log.critical("Config file %s is not valid JSON: %s" % (f, e))
+        
 
     def print_status(self):
         print "Additions: %d" % len(self.adds)
@@ -70,9 +82,11 @@ class Sync(object):
             for i, f in enumerate(self.adds):
                 src = self.src.files[f].path
                 dest = join(self.dest.root, f)
-                self.proxy.add(src, dest)
+                if not self.dry_run:
+                    self.proxy.add(src, dest)
                 log.debug("Added: %s as %s (%d/%d)" % (src, dest, i + 1, len(self.adds)))
         
         if self.removals:
             log.info("Removing Files")
-            self.proxy.delete([join(self.dest.root, f) for f in self.removals])
+            if not self.dry_run:
+                self.proxy.delete([join(self.dest.root, f) for f in self.removals])
