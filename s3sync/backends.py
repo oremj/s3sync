@@ -54,6 +54,7 @@ class S3Backend(Backend):
     
     def __init__(self, *args, **kwargs):
         super(S3Backend, self).__init__(*args, **kwargs)
+        self.root = self.root.strip('/')
         s3_config = self.config['s3']
         c = S3Connection(s3_config['access_key_id'], s3_config['secret_access_key'])
         self.bucket = c.get_bucket(self.loc)
